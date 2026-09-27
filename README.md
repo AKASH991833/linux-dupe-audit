@@ -1,59 +1,52 @@
 # Linux Dupe Audit
 
-A **read-only** Python CLI for auditing local folders on Linux. It finds byte-identical files with SHA-256 and, optionally, suggests visually similar photos using dHash. No delete, trash, or overwrite operation exists. Review results yourself before removing anything.
+A Python CLI for local Linux and Termux folders: detect exact duplicate files with SHA-256, flag visually similar photos with dHash, and optionally review exact copies for interactive deletion. It **never deletes by default**. It does not access Google Photos or cloud-only images.
 
-## Why two hashes?
+## Install and run
 
-| Mode | What it detects | Limit |
-| --- | --- | --- |
-| Exact (default) | Files with the same size and SHA-256 content digest | A resize, compression, metadata change, or re-encoding changes the digest. |
-| `--similar` | Image pairs whose 64-bit difference hashes are close | An *approximate visual candidate*, not proof of identical content; false positives and misses are possible. |
-
-The scanner compares same-size files only in exact mode, then hashes them in 1 MiB chunks. Similar mode normalizes EXIF orientation, converts to grayscale, scales to 9x8, and compares adjacent pixels. Hamming distance 0 is the closest; the default threshold of 5 is a starting point, not a guarantee. Pairwise comparison is O(n²) in the number of supported images; use small folders first. Animated GIFs use the first frame. Screenshots, flat-color images, rotated/cropped pictures, and different aspect ratios can produce misleading matches. **Always inspect the files before deciding to delete.**
-
-## Quick start
-
-Python 3.10+ recommended. Exact matching uses only the standard library; photo matching and tests need Pillow.
+Python 3.10+; exact matching uses the standard library. Pillow is needed for `--similar` and tests.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+git clone https://github.com/AKASH991833/linux-dupe-audit.git
+cd linux-dupe-audit
 python3 -m pip install -r requirements.txt
 python3 dupe_audit.py ~/Pictures
 python3 dupe_audit.py ~/Pictures --similar --threshold 5 --csv ~/dupe-report.csv
+python3 -m unittest discover -s tests -v
 ```
 
-To run only exact matching without installing anything: `python3 dupe_audit.py ~/Downloads`. For a stricter photo search use `--threshold 0`. `--threshold` accepts 0-64, and `--similar` must be enabled for it to affect the report. Paths with spaces work if quoted. CSV columns are `kind,group,distance,path,other_path`; exact groups have one row per path, similar candidates one row per pair. The CSV is overwritten if it already exists, so choose an output path carefully; the report file itself is excluded from the scan if it lies inside the folder.
+Exact mode groups equal-size files, then reads their SHA-256 digests in 1 MiB chunks. Similar mode normalizes EXIF orientation, converts supported images to grayscale and 9x8 pixels, and compares their 64-bit difference hashes. Threshold 0 means the closest hash match; default 5 allows modest changes. Similar matches are *candidates*, not proof: compressed/resized photos may match, but flat images can falsely match and crops/rotations can be missed. Similar comparisons take O(n²) in the image count. Animated GIFs use their first frame. Inspect every match before removing anything.
+
+CSV columns: `kind,group,distance,path,other_path`. A CSV path is excluded from the scanned set, but an existing report at that path is overwritten. Full local paths can reveal private information: don't share a report unreviewed. Symlinks are skipped by default; unreadable files are skipped with a warning and exit code 1. Invalid arguments and report errors exit 2.
+
+## Android / Termux
+
+This scans **files saved on the phone**, not photos that exist only in Google Photos. If all photos are cloud-only, download or export them to local storage first, with enough free space. No Google Photos API access is included.
 
 ```bash
-python3 -m unittest discover -s tests -v
-python3 dupe_audit.py --help
+pkg update
+pkg install python git python-pillow
+termux-setup-storage  # accept the Android storage prompt
+git clone https://github.com/AKASH991833/linux-dupe-audit.git
+cd linux-dupe-audit
+python dupe_audit.py ~/storage/pictures --similar
 ```
 
-### Example
+If `python-pillow` is not available on your Termux build, try `python -m pip install Pillow`. The folder may instead be `~/storage/downloads`; choose where your downloaded photos really are. Check Termux storage permission in Android Settings if access is denied.
 
-```text
-Scanned 3 files. Exact duplicate groups: 1.
+## Select and delete exact duplicates
 
-Exact group 1 (2 files):
-  /home/akash/Pictures/a.jpg
-  /home/akash/Pictures/copy/a.jpg
-
-Visually similar candidate pairs (not exact duplicates): 1.
-  1. distance=2: /home/akash/Pictures/a.jpg <> /home/akash/Pictures/a-small.jpg
+```bash
+python3 dupe_audit.py ~/Pictures --interactive
+# In Termux: python dupe_audit.py ~/storage/pictures --interactive
 ```
 
-## Safety and scope
+Each exact SHA-256 group is numbered. Enter comma-separated numbers to delete, or press Enter to skip. You must leave at least one copy. Before deletion the tool rehashes the files, shows the survivors and selected paths, and requires typing `DELETE` for that group. **Deletion is permanent local deletion, not Google Photos Trash.** Back up first; Android/cloud sync behavior can vary. Visually similar matches are *never* offered for deletion because their match is approximate.
 
-- No symlink traversal by default; inaccessible files are skipped with warnings and exit code 1. The CLI never modifies scanned files. An invalid argument or report write failure exits 2.
-- `--csv` writes a report and may overwrite an existing report. Don't run against sensitive folders if you plan to share its output: full local paths are printed and stored in CSV.
-- This audits **local files only**. It does not access Google Photos or any cloud account. To scan a cloud library, export it first and review the export's privacy and storage needs.
-- Matching SHA-256 digests is a practical exact-duplicate test, not a byte-by-byte final comparison. Extremely unlikely hash collisions remain theoretically possible.
+## Files
 
-## Project layout
+- `dupe_audit.py`: CLI, exact hash, dHash, CSV, reviewed deletion.
+- `tests/test_dupe_audit.py`: unit tests including unchanged files, symlinks, re-encoded images, and deletion safeguards.
+- `requirements.txt`: Pillow for images/tests.
 
-- `dupe_audit.py` - CLI, streaming SHA-256 scan, image dHash, CSV report.
-- `tests/test_dupe_audit.py` - tests for content grouping, symlinks, re-encoded images, non-deletion, report behavior.
-- `requirements.txt` - Pillow for similar-image mode and tests.
-
-Built as a small Linux operations tool: deterministic scans, predictable exit codes, no destructive defaults, and tests before changes.
+SHA-256 collisions are theoretically possible. This is a practical duplicate audit, not a cryptographic guarantee or a substitute for checking your backups.
